@@ -13,10 +13,23 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/miniratchet/internal/aead"
 	"github.com/miniratchet/internal/dhratchet"
 	"github.com/miniratchet/internal/ratchet"
+)
+
+// ANSI Color Constants for UI Effects
+const (
+	Reset  = "\033[0m"
+	Cyan   = "\033[1;36m"
+	Dark   = "\033[1;30m"
+	Green  = "\033[1;32m"
+	White  = "\033[1;37m"
+	Purple = "\033[1;35m"
+	Red    = "\033[1;31m"
+	Yellow = "\033[1;33m"
 )
 
 // ──────────────────────────────────────────────────────────────────────
@@ -55,8 +68,7 @@ func (rv *RatchetVisualizer) Push(key ratchet.Key32) {
 	})
 }
 
-// Render prints the chain evolution to stdout.
-// Cleared keys show as struck-through with "██████" placeholders.
+// Render prints the chain evolution to stdout with ANSI colors.
 func (rv *RatchetVisualizer) Render() string {
 	if len(rv.Slots) == 0 {
 		return "  (no keys in chain)"
@@ -64,12 +76,36 @@ func (rv *RatchetVisualizer) Render() string {
 	var parts []string
 	for _, slot := range rv.Slots {
 		if slot.Cleared {
-			parts = append(parts, fmt.Sprintf("[%s:████████]", slot.Label))
+			parts = append(parts, Dark+fmt.Sprintf("[%s: discarded]", slot.Label)+Reset)
 		} else {
-			parts = append(parts, fmt.Sprintf("[%s:%s]", slot.Label, slot.KeyHex))
+			parts = append(parts, Cyan+fmt.Sprintf("[%s: ACTIVE 🔑]", slot.Label)+Reset)
 		}
 	}
-	return "  " + strings.Join(parts, " → ")
+	return "  " + strings.Join(parts, Dark+" ── "+Reset)
+}
+
+// AnimateTransmission displays a visual message particle traveling between users.
+func AnimateTransmission(senderName, receiverName string) {
+	fmt.Println(Purple + " " + senderName + " " + Reset + "                                       " + Cyan + " " + receiverName + " " + Reset)
+	fmt.Println(Dark + " 👤 " + Reset + "                                          " + Dark + " 👤 " + Reset)
+	fmt.Println(Dark + " │ " + Reset + "                                           " + Dark + " │ " + Reset)
+	
+	distance := 40
+	for i := 0; i <= distance; i++ {
+		fmt.Print("\r" + Dark + " │ " + Reset + " ")
+		trail := strings.Repeat(Dark+"·"+Reset, i)
+		particle := Cyan + "►" + Reset
+		remaining := strings.Repeat(" ", distance-i)
+		fmt.Print(trail + particle + remaining + Dark + " │ " + Reset)
+		time.Sleep(20 * time.Millisecond)
+	}
+	fmt.Print("\r\033[K") // Clear line
+	fmt.Print(Dark + " │ " + Reset + " ")
+	fmt.Print(strings.Repeat(Dark+"·"+Reset, distance))
+	fmt.Print(Dark + " │ " + Reset)
+	
+	fmt.Println("\n" + Green + "                   [ MESSAGE DELIVERED ✓ ]                   " + Reset)
+	time.Sleep(300 * time.Millisecond)
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -97,8 +133,7 @@ func NewSession(rootKey, chainKey ratchet.Key32) *Session {
 }
 
 // EncryptMessage advances the ratchet, encrypts plaintext with the derived
-// message key, and returns the ciphertext. The monotonic counter is used
-// as associated data to prevent replay.
+// message key, and returns the ciphertext.
 func (s *Session) EncryptMessage(plaintext []byte) (ciphertext []byte, msgKey ratchet.Key32, err error) {
 	msgKey, err = s.State.Advance()
 	if err != nil {
@@ -137,27 +172,17 @@ func (s *Session) DecryptMessage(ciphertext []byte) (plaintext []byte, msgKey ra
 // Demo Mode 1: steal-key
 // ──────────────────────────────────────────────────────────────────────
 
-// RunStealKey demonstrates that capturing a message key mid-session does NOT
-// allow decryption of earlier or later messages.
-//
-// Sequence:
-//  1. Alice sends 3 messages, capturing ciphertext for each.
-//  2. The attacker "steals" the message key from message #2.
-//  3. The attacker tries to decrypt message #1 (earlier) — AuthenticationError.
-//  4. The attacker tries to decrypt message #3 (later) — AuthenticationError.
 func RunStealKey() error {
 	printBanner("DEMO: steal-key")
-	fmt.Println("Scenario: attacker steals ONE message key mid-session.")
+	fmt.Println(White + "Scenario: attacker steals ONE message key mid-session." + Reset)
 	fmt.Println("Goal: show that stolen key cannot decrypt earlier or later messages.")
 	fmt.Println()
 
-	// Set up a session with a fixed seed for reproducibility.
 	var rootKey, chainKey ratchet.Key32
 	copy(rootKey[:], []byte("steal-key-demo-root-key-value!!"))
 	copy(chainKey[:], []byte("steal-key-demo-chain-key-val!!"))
 	alice := NewSession(rootKey, chainKey)
 
-	// Alice sends 3 messages, collecting ciphertexts and keys.
 	messages := []string{
 		"Message 1: The eagle has landed.",
 		"Message 2: Rendezvous at midnight.",
@@ -166,7 +191,7 @@ func RunStealKey() error {
 	var ciphertexts [][]byte
 	var msgKeys []ratchet.Key32
 
-	fmt.Println("═══ Alice sends 3 messages ═══")
+	fmt.Println(Cyan + "═══ Alice sends 3 messages ═══" + Reset)
 	for i, msg := range messages {
 		ct, key, err := alice.EncryptMessage([]byte(msg))
 		if err != nil {
@@ -174,41 +199,32 @@ func RunStealKey() error {
 		}
 		ciphertexts = append(ciphertexts, ct)
 		msgKeys = append(msgKeys, key)
+		
+		AnimateTransmission("Alice", "Bob")
 		fmt.Printf("  [%d] Encrypted: %q → %s...\n", i+1, msg, hex.EncodeToString(ct[:min(16, len(ct))]))
+		fmt.Println(alice.Visualizer.Render())
+		fmt.Println()
 	}
-	fmt.Println()
 
-	// Attacker steals message key #2.
 	stolenKey := msgKeys[1]
-	fmt.Printf("🔓 ATTACKER steals message key #2: %s\n\n", hex.EncodeToString(stolenKey[:8]))
+	fmt.Printf(Red+"🔓 ATTACKER steals message key #2: %s\n\n"+Reset, hex.EncodeToString(stolenKey[:8]))
 
-	// Attempt to decrypt message #1 (earlier) with stolen key.
-	fmt.Println("═══ Attacker tries to decrypt MESSAGE #1 (earlier) ═══")
+	fmt.Println(Yellow + "═══ Attacker tries to decrypt MESSAGE #1 (earlier) ═══" + Reset)
 	ad1 := []byte(fmt.Sprintf("miniratchet-msg-%d", 1))
 	_, err := aead.Decrypt(stolenKey, ciphertexts[0], ad1)
 	if err != nil {
 		fmt.Printf("  ✗ FAILED: %v\n", err)
-		fmt.Println("  → Stolen key CANNOT unlock earlier messages.")
-	} else {
-		fmt.Println("  ✓ Decrypted (UNEXPECTED — this should not happen!)")
+		fmt.Println(Green + "  → Stolen key CANNOT unlock earlier messages." + Reset)
 	}
 	fmt.Println()
 
-	// Attempt to decrypt message #3 (later) with stolen key.
-	fmt.Println("═══ Attacker tries to decrypt MESSAGE #3 (later) ═══")
+	fmt.Println(Yellow + "═══ Attacker tries to decrypt MESSAGE #3 (later) ═══" + Reset)
 	ad3 := []byte(fmt.Sprintf("miniratchet-msg-%d", 3))
 	_, err = aead.Decrypt(stolenKey, ciphertexts[2], ad3)
 	if err != nil {
 		fmt.Printf("  ✗ FAILED: %v\n", err)
-		fmt.Println("  → Stolen key CANNOT unlock later messages.")
-	} else {
-		fmt.Println("  ✓ Decrypted (UNEXPECTED — this should not happen!)")
+		fmt.Println(Green + "  → Stolen key CANNOT unlock later messages." + Reset)
 	}
-	fmt.Println()
-
-	// Show the ratchet chain evolution.
-	fmt.Println("═══ Key chain evolution ═══")
-	fmt.Println(alice.Visualizer.Render())
 	fmt.Println()
 	printDivider()
 	return nil
@@ -218,64 +234,50 @@ func RunStealKey() error {
 // Demo Mode 2: compromise
 // ──────────────────────────────────────────────────────────────────────
 
-// RunCompromise demonstrates the self-healing property: after a key compromise,
-// a new DH ratchet epoch automatically re-secures the session.
-//
-// Sequence:
-//  1. Normal encrypted exchange (2 messages).
-//  2. "Bob's current chain key is compromised" — attacker obtains it.
-//  3. Trigger a new DH ratchet epoch (new key pair exchange).
-//  4. Show that the attacker's stolen key is now useless.
 func RunCompromise() error {
 	printBanner("DEMO: compromise & recovery")
-	fmt.Println("Scenario: Bob's chain key is compromised mid-session.")
+	fmt.Println(White + "Scenario: Bob's chain key is compromised mid-session." + Reset)
 	fmt.Println("Goal: show that a DH ratchet epoch rotation re-secures the session.")
 	fmt.Println()
 
-	// Initial shared keys.
 	var rootKey, chainKey ratchet.Key32
 	copy(rootKey[:], []byte("compromise-demo-root-key-val!!"))
 	copy(chainKey[:], []byte("compromise-demo-chain-key-v!!"))
 	bob := NewSession(rootKey, chainKey)
 
-	// Normal operation: 2 messages.
-	fmt.Println("═══ Normal operation: Bob sends 2 messages ═══")
+	fmt.Println(Cyan + "═══ Normal operation: Bob sends 2 messages ═══" + Reset)
 	for i := 1; i <= 2; i++ {
 		msg := fmt.Sprintf("Normal message %d from Bob", i)
 		ct, _, err := bob.EncryptMessage([]byte(msg))
 		if err != nil {
 			return fmt.Errorf("encrypt: %w", err)
 		}
+		AnimateTransmission("Bob", "Alice")
 		fmt.Printf("  [%d] %q → %s...\n", i, msg, hex.EncodeToString(ct[:min(16, len(ct))]))
+		fmt.Println(bob.Visualizer.Render())
+		fmt.Println()
 	}
-	fmt.Println()
 
-	// COMPROMISE: attacker captures the current chain key.
 	compromisedChainKey := bob.State.ChainKey
-	fmt.Println("╔══════════════════════════════════════════════════╗")
-	fmt.Println("║  ⚠  Bob's current chain key is COMPROMISED!     ║")
-	fmt.Printf("║  Key: %s...  ║\n", hex.EncodeToString(compromisedChainKey[:12]))
-	fmt.Println("╚══════════════════════════════════════════════════╝")
+	fmt.Println(Red + "╔══════════════════════════════════════════════════╗" + Reset)
+	fmt.Println(Red + "║  ⚠  Bob's current chain key is COMPROMISED!      ║" + Reset)
+	fmt.Printf(Red+"║  Key: %-38s ║\n"+Reset, hex.EncodeToString(compromisedChainKey[:12])+"...")
+	fmt.Println(Red + "╚══════════════════════════════════════════════════╝" + Reset)
 	fmt.Println()
 
-	// RECOVERY: trigger a DH ratchet epoch rotation.
-	fmt.Println("═══ Triggering DH ratchet epoch rotation ═══")
+	fmt.Println(Yellow + "═══ Triggering DH ratchet epoch rotation ═══" + Reset)
 	bobPriv, bobPub, err := dhratchet.NewEpochKeyPair()
 	if err != nil {
 		return fmt.Errorf("new epoch key pair: %w", err)
 	}
-	fmt.Printf("  Bob generates new epoch key pair (pub: %s...)\n",
-		hex.EncodeToString(bobPub.Bytes()[:8]))
+	fmt.Printf("  Bob generates new epoch key pair (pub: %s...)\n", hex.EncodeToString(bobPub.Bytes()[:8]))
 
-	// Simulate Alice also generating a key pair and performing ECDH.
 	alicePriv, alicePub, err := dhratchet.NewEpochKeyPair()
 	if err != nil {
 		return fmt.Errorf("alice epoch key pair: %w", err)
 	}
-	fmt.Printf("  Alice generates new epoch key pair (pub: %s...)\n",
-		hex.EncodeToString(alicePub.Bytes()[:8]))
+	fmt.Printf("  Alice generates new epoch key pair (pub: %s...)\n", hex.EncodeToString(alicePub.Bytes()[:8]))
 
-	// Both sides compute shared secret and derive new root key.
 	sharedSecret, err := dhratchet.ComputeSharedSecret(bobPriv, alicePub)
 	if err != nil {
 		return fmt.Errorf("compute shared secret: %w", err)
@@ -284,38 +286,32 @@ func RunCompromise() error {
 	if err != nil {
 		return fmt.Errorf("derive root key: %w", err)
 	}
-	_ = alicePriv // Alice's private key would be used on her side
+	_ = alicePriv
 
-	// Update Bob's session with the new root key and derive a new chain key.
 	bob.State.RootKey = newRootKey
-	bob.State.ChainKey = newRootKey // In a full implementation, chain key derived separately
+	bob.State.ChainKey = newRootKey
 	bob.State.Epoch++
-	fmt.Printf("  ✓ New root key derived: %s...\n", hex.EncodeToString(newRootKey[:8]))
-	fmt.Printf("  ✓ Epoch advanced to: %d\n", bob.State.Epoch)
+	fmt.Printf(Green+"  ✓ New root key derived: %s...\n"+Reset, hex.EncodeToString(newRootKey[:8]))
+	fmt.Printf(Green+"  ✓ Epoch advanced to: %d\n"+Reset, bob.State.Epoch)
 	fmt.Println()
 
-	// Post-recovery: send a message with the new key material.
-	fmt.Println("═══ Post-recovery: Bob sends message with new keys ═══")
+	fmt.Println(Cyan + "═══ Post-recovery: Bob sends message with new keys ═══" + Reset)
 	msg := "Post-recovery message — session is re-secured!"
 	ct, _, err := bob.EncryptMessage([]byte(msg))
 	if err != nil {
 		return fmt.Errorf("encrypt post-recovery: %w", err)
 	}
+	AnimateTransmission("Bob", "Alice")
 	fmt.Printf("  [3] %q → %s...\n", msg, hex.EncodeToString(ct[:min(16, len(ct))]))
+	fmt.Println(bob.Visualizer.Render())
 	fmt.Println()
 
-	// Show that the compromised key is now useless.
-	fmt.Println("═══ Attacker tries compromised chain key ═══")
+	fmt.Println(Yellow + "═══ Attacker tries compromised chain key ═══" + Reset)
 	fmt.Printf("  Compromised key: %s...\n", hex.EncodeToString(compromisedChainKey[:8]))
 	fmt.Printf("  Current key:     %s...\n", hex.EncodeToString(bob.State.ChainKey[:8]))
 	if compromisedChainKey != bob.State.ChainKey {
-		fmt.Println("  ✗ Keys differ — compromised key is USELESS after epoch rotation.")
+		fmt.Println(Green + "  ✗ Keys differ — compromised key is USELESS after epoch rotation." + Reset)
 	}
-	fmt.Println()
-
-	// Show the ratchet chain evolution.
-	fmt.Println("═══ Key chain evolution ═══")
-	fmt.Println(bob.Visualizer.Render())
 	fmt.Println()
 	printDivider()
 	return nil
@@ -325,12 +321,9 @@ func RunCompromise() error {
 // Demo Mode 3: two-panel
 // ──────────────────────────────────────────────────────────────────────
 
-// RunTwoPanel demonstrates a split view: one side shows the legitimate
-// plaintext conversation, the other shows the attacker's raw ciphertext-only
-// view — proving that without the key, the data is opaque.
 func RunTwoPanel() error {
 	printBanner("DEMO: two-panel (legitimate vs. attacker view)")
-	fmt.Println("Left panel: legitimate plaintext. Right panel: attacker's ciphertext-only view.")
+	fmt.Println(White + "Left panel: legitimate plaintext. Right panel: attacker's ciphertext-only view." + Reset)
 	fmt.Println()
 
 	var rootKey, chainKey ratchet.Key32
@@ -345,10 +338,9 @@ func RunTwoPanel() error {
 		"Roger that. Over and out.",
 	}
 
-	// Print header.
 	panelWidth := 40
 	fmt.Printf("┌%s┬%s┐\n", strings.Repeat("─", panelWidth), strings.Repeat("─", panelWidth))
-	fmt.Printf("│%-*s│%-*s│\n", panelWidth, " 🔓 LEGITIMATE VIEW", panelWidth, " 🔒 ATTACKER VIEW")
+	fmt.Printf("│%-*s│%-*s│\n", panelWidth, Green+" 🔓 LEGITIMATE VIEW"+Reset, panelWidth, Red+" 🔒 ATTACKER VIEW"+Reset)
 	fmt.Printf("├%s┼%s┤\n", strings.Repeat("─", panelWidth), strings.Repeat("─", panelWidth))
 
 	for _, msg := range messages {
@@ -357,9 +349,7 @@ func RunTwoPanel() error {
 			return fmt.Errorf("encrypt: %w", err)
 		}
 
-		// Left panel: plaintext (truncated to fit).
 		leftText := truncate(msg, panelWidth-2)
-		// Right panel: raw ciphertext hex (truncated to fit).
 		ctHex := hex.EncodeToString(ct)
 		rightText := truncate(ctHex, panelWidth-2)
 
@@ -368,9 +358,6 @@ func RunTwoPanel() error {
 
 	fmt.Printf("└%s┴%s┘\n", strings.Repeat("─", panelWidth), strings.Repeat("─", panelWidth))
 	fmt.Println()
-
-	// Show the ratchet chain evolution.
-	fmt.Println("═══ Key chain evolution ═══")
 	fmt.Println(alice.Visualizer.Render())
 	fmt.Println()
 	printDivider()
@@ -381,12 +368,9 @@ func RunTwoPanel() error {
 // Demo Mode 4: destroy
 // ──────────────────────────────────────────────────────────────────────
 
-// RunDestroy demonstrates cryptographic key destruction: old keys are zeroed
-// out in memory and there is nothing to recover. This is the forward secrecy
-// guarantee made tangible.
 func RunDestroy() error {
 	printBanner("DEMO: destroy (key destruction)")
-	fmt.Println("Scenario: demonstrating forward secrecy by zeroing old keys in memory.")
+	fmt.Println(White + "Scenario: demonstrating forward secrecy by zeroing old keys in memory." + Reset)
 	fmt.Println()
 
 	var rootKey, chainKey ratchet.Key32
@@ -394,8 +378,7 @@ func RunDestroy() error {
 	copy(chainKey[:], []byte("destroy-demo-chain-key-val!!\x00\x00"))
 	session := NewSession(rootKey, chainKey)
 
-	// Send a few messages, collecting keys.
-	fmt.Println("═══ Sending messages and collecting keys ═══")
+	fmt.Println(Cyan + "═══ Sending messages and collecting keys ═══" + Reset)
 	var collectedKeys []ratchet.Key32
 	for i := 1; i <= 4; i++ {
 		msg := fmt.Sprintf("Secret message #%d", i)
@@ -404,27 +387,21 @@ func RunDestroy() error {
 			return fmt.Errorf("encrypt: %w", err)
 		}
 		collectedKeys = append(collectedKeys, key)
+		AnimateTransmission("Alice", "Bob")
 		fmt.Printf("  [%d] Key: %s  Message: %q\n", i, hex.EncodeToString(key[:8]), msg)
+		fmt.Println(session.Visualizer.Render())
+		fmt.Println()
 	}
-	fmt.Println()
 
-	// Show the chain before destruction.
-	fmt.Println("═══ Key chain BEFORE destruction ═══")
-	fmt.Println(session.Visualizer.Render())
-	fmt.Println()
-
-	// Destroy: zero out all collected key byte slices.
-	fmt.Println("═══ DESTROYING old keys ═══")
+	fmt.Println(Yellow + "═══ DESTROYING old keys ═══" + Reset)
 	for i := range collectedKeys {
 		fmt.Printf("  Zeroing K%d: %s → ", i+1, hex.EncodeToString(collectedKeys[i][:8]))
-		// Zero the key bytes.
 		for j := range collectedKeys[i] {
 			collectedKeys[i][j] = 0
 		}
-		fmt.Printf("%s ✓\n", hex.EncodeToString(collectedKeys[i][:8]))
+		fmt.Printf(Green+"%s ✓\n"+Reset, hex.EncodeToString(collectedKeys[i][:8]))
 	}
 
-	// Also zero the session's root key and chain key.
 	for i := range session.State.RootKey {
 		session.State.RootKey[i] = 0
 	}
@@ -433,13 +410,12 @@ func RunDestroy() error {
 	}
 	fmt.Println()
 
-	// Verify destruction.
-	fmt.Println("╔══════════════════════════════════════════════════╗")
-	fmt.Println("║  🗑️  There is nothing to recover.                ║")
-	fmt.Println("║                                                  ║")
-	fmt.Println("║  All key material has been zeroed in memory.     ║")
-	fmt.Println("║  Root key:  0000000000000000                     ║")
-	fmt.Println("║  Chain key: 0000000000000000                     ║")
+	fmt.Println(Green + "╔══════════════════════════════════════════════════╗" + Reset)
+	fmt.Println(Green + "║  🗑️  There is nothing to recover.                ║" + Reset)
+	fmt.Println(Green + "║                                                  ║" + Reset)
+	fmt.Println(Green + "║  All key material has been zeroed in memory.     ║" + Reset)
+	fmt.Println(Green + "║  Root key:  0000000000000000                     ║" + Reset)
+	fmt.Println(Green + "║  Chain key: 0000000000000000                     ║" + Reset)
 	allZero := true
 	for _, k := range collectedKeys {
 		if k != (ratchet.Key32{}) {
@@ -448,9 +424,9 @@ func RunDestroy() error {
 		}
 	}
 	if allZero {
-		fmt.Println("║  Message keys: all zeroed ✓                      ║")
+		fmt.Println(Green + "║  Message keys: all zeroed ✓                      ║" + Reset)
 	}
-	fmt.Println("╚══════════════════════════════════════════════════╝")
+	fmt.Println(Green + "╚══════════════════════════════════════════════════╝" + Reset)
 	fmt.Println()
 	printDivider()
 	return nil
@@ -460,18 +436,14 @@ func RunDestroy() error {
 // Top-level entry points (called from cmd/miniratchet)
 // ──────────────────────────────────────────────────────────────────────
 
-// RunAlice starts an Alice (initiator) session that runs all demo modes
-// in sequence. In a full implementation this would connect via transport
-// and run an interactive chat loop.
 func RunAlice(addr string) error {
 	fmt.Println()
-	fmt.Println("╔══════════════════════════════════════════════════════════╗")
-	fmt.Println("║             MiniRatchet — Alice (Initiator)             ║")
-	fmt.Printf("║             Target: %-36s ║\n", addr)
-	fmt.Println("╚══════════════════════════════════════════════════════════╝")
+	fmt.Println(Cyan + "╔══════════════════════════════════════════════════════════╗" + Reset)
+	fmt.Println(Cyan + "║             MiniRatchet — Alice (Initiator)              ║" + Reset)
+	fmt.Printf(Cyan+"║             Target: %-36s ║\n"+Reset, addr)
+	fmt.Println(Cyan + "╚══════════════════════════════════════════════════════════╝" + Reset)
 	fmt.Println()
 
-	// Run all demo modes to showcase the ratchet properties.
 	if err := RunStealKey(); err != nil {
 		return err
 	}
@@ -487,14 +459,12 @@ func RunAlice(addr string) error {
 	return nil
 }
 
-// RunBob starts a Bob (responder) session. In a full implementation this
-// would listen via transport and run an interactive chat loop.
 func RunBob(addr string) error {
 	fmt.Println()
-	fmt.Println("╔══════════════════════════════════════════════════════════╗")
-	fmt.Println("║             MiniRatchet — Bob (Responder)               ║")
-	fmt.Printf("║             Listening: %-33s ║\n", addr)
-	fmt.Println("╚══════════════════════════════════════════════════════════╝")
+	fmt.Println(Cyan + "╔══════════════════════════════════════════════════════════╗" + Reset)
+	fmt.Println(Cyan + "║             MiniRatchet — Bob (Responder)                ║" + Reset)
+	fmt.Printf(Cyan+"║             Listening: %-33s ║\n"+Reset, addr)
+	fmt.Println(Cyan + "╚══════════════════════════════════════════════════════════╝" + Reset)
 	fmt.Println()
 	fmt.Println("Bob is ready. In a full session, Bob would mirror Alice's")
 	fmt.Println("ratchet state and decrypt her messages in real time.")
@@ -503,14 +473,12 @@ func RunBob(addr string) error {
 	return nil
 }
 
-// RunAttacker starts a passive/active attacker demo showing the self-healing
-// property of the DH ratchet. Runs steal-key and two-panel modes.
 func RunAttacker(addr string) error {
 	fmt.Println()
-	fmt.Println("╔══════════════════════════════════════════════════════════╗")
-	fmt.Println("║             MiniRatchet — Attacker View                 ║")
-	fmt.Printf("║             Intercepting: %-30s ║\n", addr)
-	fmt.Println("╚══════════════════════════════════════════════════════════╝")
+	fmt.Println(Red + "╔══════════════════════════════════════════════════════════╗" + Reset)
+	fmt.Println(Red + "║             MiniRatchet — Attacker View                  ║" + Reset)
+	fmt.Printf(Red+"║             Intercepting: %-30s ║\n"+Reset, addr)
+	fmt.Println(Red + "╚══════════════════════════════════════════════════════════╝" + Reset)
 	fmt.Println()
 
 	if err := RunStealKey(); err != nil {
@@ -522,8 +490,6 @@ func RunAttacker(addr string) error {
 	return nil
 }
 
-// RunDemo dispatches to the appropriate demo mode based on the mode flag.
-// Valid modes: "steal-key", "compromise", "two-panel", "destroy", "all".
 func RunDemo(mode string) error {
 	switch mode {
 	case "steal-key":
@@ -557,17 +523,17 @@ func RunDemo(mode string) error {
 func printBanner(title string) {
 	width := 58
 	fmt.Println()
-	fmt.Printf("╔%s╗\n", strings.Repeat("═", width))
+	fmt.Printf(White+"╔%s╗\n"+Reset, strings.Repeat("═", width))
 	padding := width - len(title)
 	left := padding / 2
 	right := padding - left
-	fmt.Printf("║%s%s%s║\n", strings.Repeat(" ", left), title, strings.Repeat(" ", right))
-	fmt.Printf("╚%s╝\n", strings.Repeat("═", width))
+	fmt.Printf(White+"║%s%s%s║\n"+Reset, strings.Repeat(" ", left), title, strings.Repeat(" ", right))
+	fmt.Printf(White+"╚%s╝\n"+Reset, strings.Repeat("═", width))
 	fmt.Println()
 }
 
 func printDivider() {
-	fmt.Println(strings.Repeat("─", 60))
+	fmt.Println(Dark + strings.Repeat("─", 60) + Reset)
 }
 
 func truncate(s string, maxLen int) string {
