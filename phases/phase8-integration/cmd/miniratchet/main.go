@@ -1,3 +1,15 @@
+// Package main provides the CLI entrypoint for MiniRatchet, a zero-dependency
+// Signal-style ratchet messenger.
+//
+// Usage:
+//
+//	miniratchet --role alice              # run all demos as Alice (initiator)
+//	miniratchet --role bob                # start as Bob   (responder)
+//	miniratchet --role attacker           # run attacker-focused demos
+//	miniratchet --demo steal-key          # run a single demo mode
+//	miniratchet --demo all                # run all demo modes in sequence
+//
+// Phase 5 — wired to internal/demo.
 package main
 
 import (
@@ -5,46 +17,44 @@ import (
 	"fmt"
 	"os"
 
-	"miniratchet/internal/demo"
+	"github.com/miniratchet/internal/demo"
 )
 
 func main() {
-	roleFlag := flag.String("role", "", "Role to run as: alice, bob, attacker, or demo")
-	demoFlag := flag.String("demo", "all", "Which demo to run: steal-key, compromise, two-panel, destroy, all")
+	role := flag.String("role", "", "role to assume: alice, bob, or attacker")
+	demoMode := flag.String("demo", "", "demo mode: steal-key, compromise, two-panel, destroy, all")
+	addr := flag.String("addr", "localhost:9000", "address for TCP connection")
 	flag.Parse()
 
-	if *roleFlag == "" {
-		fmt.Println("Usage: miniratchet --role [alice|bob|attacker|demo] [--demo name]")
-		os.Exit(1)
-	}
-
-	if *roleFlag == "demo" {
-		switch *demoFlag {
-		case "steal-key":
-			demo.RunStealKeyDemo()
-		case "compromise":
-			demo.RunCompromiseDemo()
-		case "two-panel":
-			demo.RunTwoPanelDemo()
-		case "destroy":
-			demo.RunDestroyDemo()
-		case "all":
-			fmt.Println("=== RUNNING ALL DEMOS ===")
-			demo.RunStealKeyDemo()
-			fmt.Println("\n------------------------------------------------")
-			demo.RunCompromiseDemo()
-			fmt.Println("\n------------------------------------------------")
-			demo.RunTwoPanelDemo()
-			fmt.Println("\n------------------------------------------------")
-			demo.RunDestroyDemo()
-		default:
-			fmt.Printf("Unknown demo mode: %s\n", *demoFlag)
+	// If --demo is specified, run that specific demo mode directly.
+	if *demoMode != "" {
+		if err := demo.RunDemo(*demoMode); err != nil {
+			fmt.Fprintf(os.Stderr, "demo error: %v\n", err)
 			os.Exit(1)
 		}
 		return
 	}
 
-	fmt.Printf("[+] Starting MiniRatchet in role: %s\n", *roleFlag)
-	fmt.Println("[!] Network transport for alice/bob/attacker not fully wired in main.go yet.")
-	fmt.Println("[*] Use '--role demo --demo all' to see the core project deliverables.")
+	// Otherwise dispatch by role.
+	switch *role {
+	case "alice":
+		if err := demo.RunAlice(*addr); err != nil {
+			fmt.Fprintf(os.Stderr, "alice error: %v\n", err)
+			os.Exit(1)
+		}
+	case "bob":
+		if err := demo.RunBob(*addr); err != nil {
+			fmt.Fprintf(os.Stderr, "bob error: %v\n", err)
+			os.Exit(1)
+		}
+	case "attacker":
+		if err := demo.RunAttacker(*addr); err != nil {
+			fmt.Fprintf(os.Stderr, "attacker error: %v\n", err)
+			os.Exit(1)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "usage: miniratchet --role alice|bob|attacker\n")
+		fmt.Fprintf(os.Stderr, "       miniratchet --demo steal-key|compromise|two-panel|destroy|all\n")
+		os.Exit(1)
+	}
 }
