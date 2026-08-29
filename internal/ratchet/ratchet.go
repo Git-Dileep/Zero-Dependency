@@ -15,8 +15,13 @@
 //
 //	func (rs *RatchetState) Advance() (messageKey Key32, err error)
 //
-// Phase 2 scaffold — implementation will be filled in by Phase 2.
+// Phase 2 — full implementation.
 package ratchet
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+)
 
 // Key32 is the canonical key type used for chain keys, message keys, and root keys.
 type Key32 = [32]byte
@@ -32,7 +37,32 @@ type RatchetState struct {
 // Advance steps the symmetric ratchet forward by one tick, deriving a new
 // message key and updating the chain key in place.
 //
-// TODO(phase2): implement KDF chain step.
+// The derivation uses HMAC-SHA256 as a KDF:
+//   - messageKey  = HMAC-SHA256(ChainKey, 0x01)
+//   - nextChainKey = HMAC-SHA256(ChainKey, 0x02)
+//
+// The old ChainKey bytes are zeroed before being replaced, ensuring that
+// a compromised chain key cannot be used to recover earlier message keys
+// (forward secrecy within an epoch).
 func (rs *RatchetState) Advance() (messageKey Key32, err error) {
-	return Key32{}, nil // placeholder
+	// Derive the message key: HMAC-SHA256(ChainKey, 0x01).
+	msgMAC := hmac.New(sha256.New, rs.ChainKey[:])
+	msgMAC.Write([]byte{0x01})
+	msgKeySlice := msgMAC.Sum(nil)
+	copy(messageKey[:], msgKeySlice)
+
+	// Derive the next chain key: HMAC-SHA256(ChainKey, 0x02).
+	chainMAC := hmac.New(sha256.New, rs.ChainKey[:])
+	chainMAC.Write([]byte{0x02})
+	nextChainKey := chainMAC.Sum(nil)
+
+	// Zero the old chain key bytes before replacing (forward secrecy).
+	for i := range rs.ChainKey {
+		rs.ChainKey[i] = 0
+	}
+
+	// Install the new chain key.
+	copy(rs.ChainKey[:], nextChainKey)
+
+	return messageKey, nil
 }
