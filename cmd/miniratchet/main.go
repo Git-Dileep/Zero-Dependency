@@ -3,6 +3,7 @@
 //
 // Usage:
 //
+//	miniratchet                           # (default) run the evaluator guided tour & interactive chat
 //	miniratchet --role alice              # run all demos as Alice (initiator)
 //	miniratchet --role bob                # start as Bob   (responder)
 //	miniratchet --role attacker           # run attacker-focused demos
@@ -13,9 +14,11 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/miniratchet/internal/demo"
 )
@@ -23,8 +26,29 @@ import (
 func main() {
 	role := flag.String("role", "", "role to assume: alice, bob, or attacker")
 	demoMode := flag.String("demo", "", "demo mode: steal-key, compromise, two-panel, destroy, all")
+	tour := flag.Bool("tour", false, "run the guided evaluator tour (default if no args)")
 	addr := flag.String("addr", "localhost:9000", "address for TCP connection")
 	flag.Parse()
+
+	// If no flags provided, or explicit --tour, run the guided evaluator experience.
+	if flag.NFlag() == 0 || *tour {
+		if err := demo.RunGuidedTour(); err != nil {
+			fmt.Fprintf(os.Stderr, "tour error: %v\n", err)
+			os.Exit(1)
+		}
+		
+		fmt.Print("\n\033[1;37mEnter Interactive Chat Mode? [Y/n]: \033[0m")
+		reader := bufio.NewReader(os.Stdin)
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(strings.ToLower(input))
+		if input != "n" && input != "no" {
+			if err := demo.RunInteractiveChat(); err != nil {
+				fmt.Fprintf(os.Stderr, "chat error: %v\n", err)
+				os.Exit(1)
+			}
+		}
+		return
+	}
 
 	// If --demo is specified, run that specific demo mode directly.
 	if *demoMode != "" {
@@ -53,7 +77,8 @@ func main() {
 			os.Exit(1)
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "usage: miniratchet --role alice|bob|attacker\n")
+		fmt.Fprintf(os.Stderr, "usage: miniratchet [no args] (runs the guided tour)\n")
+		fmt.Fprintf(os.Stderr, "       miniratchet --role alice|bob|attacker\n")
 		fmt.Fprintf(os.Stderr, "       miniratchet --demo steal-key|compromise|two-panel|destroy|all\n")
 		os.Exit(1)
 	}
