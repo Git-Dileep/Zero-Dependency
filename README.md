@@ -13,13 +13,29 @@ MiniRatchet implements the core primitives of the [Double Ratchet Algorithm](htt
 - **DH ratchet** — X25519 ephemeral key exchange that rotates the root key, providing self-healing after compromise
 - **Length-prefixed transport** — Simple TCP framing for multi-process Alice/Bob/Attacker communication
 
-## Build
+## Quick Start
 
 ```bash
+# Build (one command, zero downloads)
+make build
+# — or —
 go build -o miniratchet ./cmd/miniratchet
+
+# Run the guided tour + interactive chat
+./miniratchet
+
+# Run all demos
+./miniratchet --demo all
+
+# Run tests
+make test
+
+# Verify zero dependencies
+make deps-proof
 ```
 
-Single command. No `go mod download`. No dependencies to fetch. That's the point.
+**Go version:** 1.23+ (tested on 1.26.1)
+**Dependencies:** None. `go.mod` has no `require` block. See [deps-proof.txt](deps-proof.txt).
 
 ## Run the Demo
 
