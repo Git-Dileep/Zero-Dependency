@@ -1,0 +1,20 @@
+Zero Dependency Proof — MiniRatchet
+====================================
+
+=== Module listing (go list -m all) ===
+github.com/miniratchet
+
+=== Module verification (go mod verify) ===
+all modules verified
+
+=== go.mod contents ===
+module github.com/miniratchet
+
+go 1.23
+
+(No require block. Zero third-party dependencies.)
+
+=== Reproducible Build Hashes (go build -trimpath) ===
+Build 1: d8fb329c59d1ffe59072862d219938926a4823bc4c801993644ee4a1fd2207c4
+Build 2: d8fb329c59d1ffe59072862d219938926a4823bc4c801993644ee4a1fd2207c4
+Result:  IDENTICAL ✓

@@ -7,6 +7,9 @@
 /miniratchet
 /miniratchet_1
 /miniratchet_2
+/miniratchet_r1*
+/miniratchet_r2*
+/miniratchet_verify*
 
 # Test binary
 *.test
